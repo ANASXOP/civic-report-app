@@ -1,158 +1,137 @@
 import React, { useState, useEffect } from 'react';
-import { MapPin, List, Map, Plus, Filter, Camera, Upload, CheckCircle, Clock, AlertCircle, X, Send, Users, Star, MessageCircle, ThumbsUp, Award, TrendingUp, Shield, Phone, Mail, LogIn, LogOut, User } from 'lucide-react';
+import { MapPin, List, Map, Plus, Filter, Camera, Upload, CheckCircle, Clock, AlertCircle, X, Send, Users, Star, MessageCircle, ThumbsUp, Award, TrendingUp, Shield, Phone, Mail, LogIn, LogOut, User, Eye, EyeOff, Settings, UserCheck, FileText, BarChart3 } from 'lucide-react';
 
-const CivicReport = () => {
+const API_BASE_URL = process.env.NODE_ENV === 'production' 
+  ? 'https://your-api-domain.com/api' 
+  : 'http://localhost:5000/api';
+
+// API Service Class
+class ApiService {
+  static getAuthHeader() {
+    const token = localStorage.getItem('token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  static async request(endpoint, options = {}) {
+    const url = `${API_BASE_URL}${endpoint}`;
+    const config = {
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.getAuthHeader(),
+        ...options.headers,
+      },
+      ...options,
+    };
+
+    try {
+      const response = await fetch(url, config);
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.message || 'API request failed');
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('API Error:', error);
+      throw error;
+    }
+  }
+
+  static async login(email, password) {
+    return this.request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  }
+
+  static async register(userData) {
+    return this.request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+  }
+
+  static async getProfile() {
+    return this.request('/auth/profile');
+  }
+
+  static async getIssues(filters = {}) {
+    const params = new URLSearchParams();
+    Object.keys(filters).forEach(key => {
+      if (filters[key] && filters[key] !== 'all') {
+        params.append(key, filters[key]);
+      }
+    });
+    
+    return this.request(`/issues?${params.toString()}`);
+  }
+
+  static async createIssue(formData) {
+    return this.request('/issues', {
+      method: 'POST',
+      headers: { ...this.getAuthHeader() },
+      body: formData, // FormData for file upload
+    });
+  }
+
+  static async updateIssue(id, updateData) {
+    return this.request(`/issues/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updateData),
+    });
+  }
+
+  static async assignIssue(id, adminId) {
+    return this.request(`/issues/${id}/assign`, {
+      method: 'PUT',
+      body: JSON.stringify({ adminId }),
+    });
+  }
+
+  static async upvoteIssue(id) {
+    return this.request(`/issues/${id}/upvote`, {
+      method: 'POST',
+    });
+  }
+
+  static async getAdmins() {
+    return this.request('/admin/admins');
+  }
+
+  static async getDashboardStats() {
+    return this.request('/stats/dashboard');
+  }
+
+  static async initializeDatabase() {
+    return this.request('/init', { method: 'POST' });
+  }
+}
+
+const CivicReportApp = () => {
+  // Authentication & User Management
+  const [currentPage, setCurrentPage] = useState('auth');
+  const [authMode, setAuthMode] = useState('login');
+  const [user, setUser] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  
+  // Form states
+  const [loginForm, setLoginForm] = useState({ email: '', password: '', showPassword: false });
+  const [signupForm, setSignupForm] = useState({
+    name: '', email: '', password: '', confirmPassword: '', 
+    phone: '', address: '', showPassword: false, showConfirmPassword: false
+  });
+  
+  // App states
   const [view, setView] = useState('map');
   const [showReportForm, setShowReportForm] = useState(false);
-  const [userLocation, setUserLocation] = useState({ lat: 28.6139, lng: 77.2090 });
   const [selectedIssue, setSelectedIssue] = useState(null);
-  const [userPoints, setUserPoints] = useState(150);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [user, setUser] = useState(null);
+  const [issues, setIssues] = useState([]);
+  const [admins, setAdmins] = useState([]);
+  const [stats, setStats] = useState({});
   const [userVotes, setUserVotes] = useState(new Set());
-  
-  const [issues, setIssues] = useState([
-    {
-      id: 1,
-      title: 'Large pothole causing accidents',
-      category: 'Roads & Transportation',
-      status: 'Open',
-      location: 'Sector 15, Dwarka',
-      coordinates: { lat: 28.6139, lng: 77.2090 },
-      image: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=300&h=200&fit=crop',
-      reportedBy: 'Rahul Sharma',
-      reporterContact: '+91-9876543210',
-      reporterAddress: '123 Main Street, Dwarka',
-      description: 'Deep pothole causing traffic issues and vehicle damage. Multiple accidents reported.',
-      date: '2024-09-12',
-      distance: '0.3 km',
-      upvotes: 15,
-      comments: 8,
-      priority: 'High',
-      assignedOfficer: 'PWD Officer - Amit Kumar',
-      timeline: '5-7 days'
-    },
-    {
-      id: 2,
-      title: 'Water pipe burst flooding street',
-      category: 'Water & Sanitation',
-      status: 'In Progress',
-      location: 'Block A, Janakpuri',
-      coordinates: { lat: 28.6219, lng: 77.1990 },
-      image: 'https://images.unsplash.com/photo-1581056771107-24ca5f033842?w=300&h=200&fit=crop',
-      reportedBy: 'Priya Gupta',
-      reporterContact: '+91-9876543211',
-      reporterAddress: '456 Block A, Janakpuri',
-      description: 'Major water pipe burst causing street flooding and water wastage',
-      date: '2024-09-10',
-      distance: '0.7 km',
-      upvotes: 23,
-      comments: 12,
-      priority: 'Critical',
-      assignedOfficer: 'Water Dept - Sunita Rani',
-      timeline: '2-3 days'
-    },
-    {
-      id: 3,
-      title: 'Illegal garbage dumping site',
-      category: 'Waste Management',
-      status: 'Resolved',
-      location: 'Market Road, Uttam Nagar',
-      coordinates: { lat: 28.6019, lng: 77.1890 },
-      image: 'https://images.unsplash.com/photo-1532996122724-e3c354a0b15b?w=300&h=200&fit=crop',
-      reportedBy: 'Amit Kumar',
-      reporterContact: '+91-9876543212',
-      reporterAddress: '789 Market Road, Uttam Nagar',
-      description: 'Large illegal garbage dumping affecting local environment and health',
-      date: '2024-09-08',
-      distance: '0.9 km',
-      upvotes: 31,
-      comments: 15,
-      priority: 'Medium',
-      assignedOfficer: 'Sanitation Dept - Raj Patel',
-      timeline: 'Completed'
-    },
-    {
-      id: 4,
-      title: 'Multiple street lights not working',
-      category: 'Public Utilities',
-      status: 'Open',
-      location: 'Green Park Extension',
-      coordinates: { lat: 28.6259, lng: 77.2190 },
-      image: 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=300&h=200&fit=crop',
-      reportedBy: 'Sunita Devi',
-      reporterContact: '+91-9876543213',
-      reporterAddress: '321 Green Park Extension',
-      description: 'Entire street section without lighting, creating safety concerns for residents',
-      date: '2024-09-13',
-      distance: '0.5 km',
-      upvotes: 18,
-      comments: 6,
-      priority: 'High',
-      assignedOfficer: 'Electrical Dept - Mohan Singh',
-      timeline: '3-4 days'
-    },
-    {
-      id: 5,
-      title: 'Air pollution from illegal burning',
-      category: 'Environmental Issues',
-      status: 'In Progress',
-      location: 'Industrial Area Phase 1',
-      coordinates: { lat: 28.6339, lng: 77.1990 },
-      image: 'https://images.unsplash.com/photo-1611273426858-450d8e3c9fce?w=300&h=200&fit=crop',
-      reportedBy: 'Dr. Vikash Agarwal',
-      reporterContact: '+91-9876543214',
-      reporterAddress: '654 Industrial Area Phase 1',
-      description: 'Illegal waste burning causing severe air pollution and health hazards',
-      date: '2024-09-11',
-      distance: '0.6 km',
-      upvotes: 42,
-      comments: 20,
-      priority: 'Critical',
-      assignedOfficer: 'Environmental Officer - Neha Sharma',
-      timeline: '1-2 days'
-    },
-    {
-      id: 6,
-      title: 'Bus stop shelter damaged',
-      category: 'Public Infrastructure',
-      status: 'Open',
-      location: 'Ring Road, Lajpat Nagar',
-      coordinates: { lat: 28.5665, lng: 77.2433 },
-      image: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=300&h=200&fit=crop',
-      reportedBy: 'Meera Jain',
-      reporterContact: '+91-9876543215',
-      reporterAddress: '890 Ring Road, Lajpat Nagar',
-      description: 'Bus shelter roof collapsed, benches broken, unsafe for commuters',
-      date: '2024-09-14',
-      distance: '1.2 km',
-      upvotes: 9,
-      comments: 3,
-      priority: 'Medium',
-      assignedOfficer: 'Public Works - Ravi Gupta',
-      timeline: '7-10 days'
-    },
-    {
-      id: 7,
-      title: 'Stray dog menace in residential area',
-      category: 'Public Safety',
-      status: 'Open',
-      location: 'Vasant Kunj Sector C',
-      coordinates: { lat: 28.5245, lng: 77.1575 },
-      image: 'https://images.unsplash.com/photo-1552053849-ac61327b8de8?w=300&h=200&fit=crop',
-      reportedBy: 'Kiran Patel',
-      reporterContact: '+91-9876543216',
-      reporterAddress: '234 Vasant Kunj Sector C',
-      description: 'Aggressive stray dogs threatening children and elderly residents',
-      date: '2024-09-13',
-      distance: '0.8 km',
-      upvotes: 28,
-      comments: 14,
-      priority: 'High',
-      assignedOfficer: 'Animal Control - Sanjay Kumar',
-      timeline: '2-3 days'
-    }
-  ]);
   
   const [filters, setFilters] = useState({
     category: 'all',
@@ -165,12 +144,8 @@ const CivicReport = () => {
     category: 'Roads & Transportation',
     description: '',
     location: '',
-    reporterName: '',
-    reporterContact: '',
-    reporterAddress: '',
-    image: null,
-    voiceNote: null,
-    priority: 'Medium'
+    priority: 'Medium',
+    images: []
   });
 
   const categories = [
@@ -181,9 +156,7 @@ const CivicReport = () => {
     { id: 'Environmental Issues', label: 'Environmental Issues', color: 'bg-emerald-500', icon: '🌱' },
     { id: 'Public Infrastructure', label: 'Public Infrastructure', color: 'bg-orange-500', icon: '🏗️' },
     { id: 'Public Safety', label: 'Public Safety', color: 'bg-purple-500', icon: '🚨' },
-    { id: 'Health & Hygiene', label: 'Health & Hygiene', color: 'bg-pink-500', icon: '🏥' },
-    { id: 'Traffic & Parking', label: 'Traffic & Parking', color: 'bg-indigo-500', icon: '🚦' },
-    { id: 'Noise Pollution', label: 'Noise Pollution', color: 'bg-cyan-500', icon: '🔇' }
+    { id: 'Health & Hygiene', label: 'Health & Hygiene', color: 'bg-pink-500', icon: '🏥' }
   ];
 
   const statusConfig = {
@@ -199,256 +172,682 @@ const CivicReport = () => {
     'Critical': { color: 'text-red-600 bg-red-100', label: 'Critical' }
   };
 
+  // Initialize app
   useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setUserLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          });
-        },
-        (error) => {
-          console.log('Location access denied');
+    const initApp = async () => {
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          const userData = await ApiService.getProfile();
+          setUser(userData);
+          setIsLoggedIn(true);
+          setCurrentPage(userData.role === 'superadmin' ? 'superadmin' : 
+                        userData.role === 'admin' ? 'admin' : 'citizen');
+          
+          // Load user's voted issues
+          if (userData.votedIssues) {
+            setUserVotes(new Set(userData.votedIssues));
+          }
+        } catch (error) {
+          console.error('Authentication failed:', error);
+          localStorage.removeItem('token');
+          setCurrentPage('auth');
         }
-      );
-    }
+      }
+    };
+
+    initApp();
   }, []);
 
-  const filteredIssues = issues.filter(issue => {
-    return (filters.category === 'all' || issue.category === filters.category) &&
-           (filters.status === 'all' || issue.status === filters.status) &&
-           (filters.priority === 'all' || issue.priority === filters.priority);
-  });
+  // Load issues when user logs in or filters change
+  useEffect(() => {
+    if (isLoggedIn) {
+      loadIssues();
+      loadStats();
+      if (user?.role === 'superadmin') {
+        loadAdmins();
+      }
+    }
+  }, [isLoggedIn, filters]);
 
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewIssue(prev => ({ ...prev, image: reader.result }));
-      };
-      reader.readAsDataURL(file);
+  const loadIssues = async () => {
+    try {
+      const data = await ApiService.getIssues(filters);
+      setIssues(data);
+    } catch (error) {
+      setError('Failed to load issues');
     }
   };
 
-  const handleGoogleLogin = () => {
-    // Simulated Google login
-    const userData = {
-      id: 'google_123456',
-      name: 'John Doe',
-      email: 'john.doe@gmail.com',
-      picture: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face'
-    };
-    setUser(userData);
-    setIsLoggedIn(true);
-    alert('Successfully logged in with Google!');
+  const loadAdmins = async () => {
+    try {
+      const data = await ApiService.getAdmins();
+      setAdmins(data);
+    } catch (error) {
+      setError('Failed to load admins');
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const data = await ApiService.getDashboardStats();
+      setStats(data);
+    } catch (error) {
+      console.error('Failed to load stats:', error);
+    }
+  };
+
+  // Authentication functions
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      const data = await ApiService.login(loginForm.email, loginForm.password);
+      localStorage.setItem('token', data.token);
+      setUser(data.user);
+      setIsLoggedIn(true);
+      setCurrentPage(data.user.role === 'superadmin' ? 'superadmin' : 
+                    data.user.role === 'admin' ? 'admin' : 'citizen');
+      setLoginForm({ email: '', password: '', showPassword: false });
+    } catch (error) {
+      setError(error.message || 'Login failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    if (signupForm.password !== signupForm.confirmPassword) {
+      setError('Passwords do not match');
+      setLoading(false);
+      return;
+    }
+
+    if (signupForm.password.length < 6) {
+      setError('Password must be at least 6 characters long');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const data = await ApiService.register({
+        name: signupForm.name,
+        email: signupForm.email,
+        password: signupForm.password,
+        phone: signupForm.phone,
+        address: signupForm.address
+      });
+
+      localStorage.setItem('token', data.token);
+      setUser(data.user);
+      setIsLoggedIn(true);
+      setCurrentPage('citizen');
+      setSignupForm({
+        name: '', email: '', password: '', confirmPassword: '', 
+        phone: '', address: '', showPassword: false, showConfirmPassword: false
+      });
+    } catch (error) {
+      setError(error.message || 'Registration failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogout = () => {
+    localStorage.removeItem('token');
     setUser(null);
     setIsLoggedIn(false);
+    setCurrentPage('auth');
     setUserVotes(new Set());
+    setIssues([]);
   };
 
-  const handleUpvote = (issueId) => {
-    if (!isLoggedIn) {
-      alert('Please login to vote on issues');
-      return;
+  // Issue management functions
+  const handleSubmitIssue = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      const formData = new FormData();
+      formData.append('title', newIssue.title);
+      formData.append('description', newIssue.description);
+      formData.append('category', newIssue.category);
+      formData.append('priority', newIssue.priority);
+      formData.append('location', newIssue.location);
+      
+      // Get user's current location
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition((position) => {
+          formData.append('lat', position.coords.latitude);
+          formData.append('lng', position.coords.longitude);
+        });
+      }
+
+      // Add images
+      newIssue.images.forEach((image, index) => {
+        formData.append('images', image);
+      });
+
+      const data = await ApiService.createIssue(formData);
+      
+      // Update local state
+      setIssues(prev => [data.issue, ...prev]);
+      setUser(prev => ({ ...prev, points: prev.points + 10 }));
+      
+      setNewIssue({
+        title: '',
+        category: 'Roads & Transportation',
+        description: '',
+        location: '',
+        priority: 'Medium',
+        images: []
+      });
+      setShowReportForm(false);
+      alert('Issue reported successfully! You earned 10 points.');
+    } catch (error) {
+      setError(error.message || 'Failed to submit issue');
+    } finally {
+      setLoading(false);
     }
-    
+  };
+
+  const handleUpvote = async (issueId) => {
     if (userVotes.has(issueId)) {
       alert('You have already voted on this issue');
       return;
     }
 
-    setIssues(prev => prev.map(issue => 
-      issue.id === issueId 
-        ? { ...issue, upvotes: issue.upvotes + 1 }
-        : issue
-    ));
-    setUserVotes(prev => new Set([...prev, issueId]));
-    setUserPoints(prev => prev + 5);
+    try {
+      const data = await ApiService.upvoteIssue(issueId);
+      
+      setIssues(prev => prev.map(issue => 
+        issue._id === issueId 
+          ? { ...issue, upvotes: data.upvotes }
+          : issue
+      ));
+      setUserVotes(prev => new Set([...prev, issueId]));
+      setUser(prev => ({ ...prev, points: prev.points + 5 }));
+    } catch (error) {
+      alert(error.message || 'Failed to upvote issue');
+    }
   };
 
-  const handleSubmitIssue = (e) => {
-    e.preventDefault();
-    
-    if (!isLoggedIn) {
-      alert('Please login to report an issue');
-      return;
+  // Admin functions
+  const assignIssueToAdmin = async (issueId, adminId) => {
+    try {
+      await ApiService.assignIssue(issueId, adminId);
+      loadIssues(); // Reload issues to reflect changes
+      const admin = admins.find(a => a._id === adminId);
+      alert(`Issue assigned to ${admin.name} (${admin.department})`);
+    } catch (error) {
+      alert(error.message || 'Failed to assign issue');
     }
-    
-    if (!newIssue.title || !newIssue.description || !newIssue.location || !newIssue.reporterName || !newIssue.reporterContact) {
-      alert('Please fill all required fields');
-      return;
-    }
-
-    const issue = {
-      id: issues.length + 1,
-      title: newIssue.title,
-      category: newIssue.category,
-      status: 'Open',
-      location: newIssue.location,
-      coordinates: { lat: userLocation.lat + (Math.random() - 0.5) * 0.01, lng: userLocation.lng + (Math.random() - 0.5) * 0.01 },
-      image: newIssue.image || 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=300&h=200&fit=crop',
-      reportedBy: newIssue.reporterName,
-      reporterContact: newIssue.reporterContact,
-      reporterAddress: newIssue.reporterAddress,
-      description: newIssue.description,
-      date: new Date().toISOString().split('T')[0],
-      distance: '0.1 km',
-      upvotes: 1,
-      comments: 0,
-      priority: newIssue.priority,
-      assignedOfficer: 'To be assigned',
-      timeline: 'Under review'
-    };
-
-    setIssues(prev => [issue, ...prev]);
-    setUserPoints(prev => prev + 10);
-    setNewIssue({
-      title: '',
-      category: 'Roads & Transportation',
-      description: '',
-      location: '',
-      reporterName: '',
-      reporterContact: '',
-      reporterAddress: '',
-      image: null,
-      voiceNote: null,
-      priority: 'Medium'
-    });
-    setShowReportForm(false);
-    alert('Issue reported successfully! You earned 10 points.');
   };
 
-  const openStatusCount = issues.filter(i => i.status === 'Open').length;
-  const inProgressCount = issues.filter(i => i.status === 'In Progress').length;
-  const resolvedCount = issues.filter(i => i.status === 'Resolved').length;
+  const updateIssueStatus = async (issueId, newStatus, officerName = null) => {
+    try {
+      const updateData = { status: newStatus };
+      if (officerName) updateData.assignedOfficer = officerName;
+      
+      await ApiService.updateIssue(issueId, updateData);
+      loadIssues(); // Reload issues to reflect changes
+    } catch (error) {
+      alert(error.message || 'Failed to update issue');
+    }
+  };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      {/* Enhanced Header */}
-      <header className="bg-white shadow-lg border-b border-blue-200">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-3 rounded-xl shadow-lg">
-                <MapPin className="h-8 w-8 text-white" />
-              </div>
-              <div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                  Civic Report System
-                </h1>
-                <p className="text-sm text-gray-600">Smart India Hackathon 2025 | Team Tech Titans</p>
-              </div>
+  const handleImageUpload = (e) => {
+    const files = Array.from(e.target.files);
+    setNewIssue(prev => ({ ...prev, images: [...prev.images, ...files] }));
+  };
+
+  const removeImage = (index) => {
+    setNewIssue(prev => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index)
+    }));
+  };
+
+  // Filter issues based on user role and current filters
+  const filteredIssues = issues.filter(issue => {
+    const categoryMatch = filters.category === 'all' || issue.category === filters.category;
+    const statusMatch = filters.status === 'all' || issue.status === filters.status;
+    const priorityMatch = filters.priority === 'all' || issue.priority === filters.priority;
+    
+    return categoryMatch && statusMatch && priorityMatch;
+  });
+
+  // Authentication Page Component
+  const AuthPage = () => (
+    <div className="min-h-screen bg-gradient-to-br from-blue-600 via-purple-600 to-indigo-800 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-8 text-white text-center">
+          <div className="bg-white bg-opacity-20 p-4 rounded-full w-20 h-20 mx-auto mb-4 flex items-center justify-center">
+            <MapPin className="h-10 w-10" />
+          </div>
+          <h1 className="text-2xl font-bold mb-2">Civic Report System</h1>
+          <p className="text-blue-100">Smart India Hackathon 2025</p>
+        </div>
+
+        <div className="p-8">
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              {error}
             </div>
-            
-            <div className="flex items-center space-x-4">
-              {/* User Authentication */}
-              {isLoggedIn ? (
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center space-x-2">
-                    <img 
-                      src={user?.picture} 
-                      alt="Profile" 
-                      className="w-10 h-10 rounded-full border-2 border-blue-500"
-                    />
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">{user?.name}</p>
-                      <p className="text-xs text-gray-500">{user?.email}</p>
-                    </div>
-                  </div>
+          )}
+
+          <div className="flex mb-6 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => { setAuthMode('login'); setError(''); }}
+              className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
+                authMode === 'login' 
+                  ? 'bg-blue-600 text-white shadow-md' 
+                  : 'text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              Login
+            </button>
+            <button
+              onClick={() => { setAuthMode('signup'); setError(''); }}
+              className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
+                authMode === 'signup' 
+                  ? 'bg-blue-600 text-white shadow-md' 
+                  : 'text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              Sign Up
+            </button>
+          </div>
+
+          {authMode === 'login' ? (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <input
+                  type="email"
+                  value={loginForm.email}
+                  onChange={(e) => setLoginForm(prev => ({ ...prev, email: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Enter your email"
+                  required
+                  disabled={loading}
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                <div className="relative">
+                  <input
+                    type={loginForm.showPassword ? 'text' : 'password'}
+                    value={loginForm.password}
+                    onChange={(e) => setLoginForm(prev => ({ ...prev, password: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 pr-12 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Enter your password"
+                    required
+                    disabled={loading}
+                  />
                   <button
-                    onClick={handleLogout}
-                    className="text-gray-600 hover:text-gray-800 p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    type="button"
+                    onClick={() => setLoginForm(prev => ({ ...prev, showPassword: !prev.showPassword }))}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                    disabled={loading}
                   >
-                    <LogOut className="h-5 w-5" />
+                    {loginForm.showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                   </button>
                 </div>
-              ) : (
-                <button
-                  onClick={handleGoogleLogin}
-                  className="bg-white border border-gray-300 px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-gray-50 transition-colors shadow-sm"
-                >
-                  <div className="w-5 h-5 bg-gradient-to-r from-red-500 via-yellow-500 to-blue-500 rounded"></div>
-                  <span className="text-sm font-medium">Login with Google</span>
-                </button>
-              )}
-              
-              {/* User Points */}
-              {isLoggedIn && (
-                <div className="bg-gradient-to-r from-yellow-400 to-orange-500 px-4 py-2 rounded-full flex items-center space-x-2">
-                  <Star className="h-4 w-4 text-white" />
-                  <span className="text-sm font-bold text-white">{userPoints} Points</span>
-                </div>
-              )}
-              
-              <div className="bg-green-100 px-4 py-2 rounded-full flex items-center space-x-2">
-                <TrendingUp className="h-4 w-4 text-green-600" />
-                <span className="text-sm font-medium text-green-800">{issues.length} Issues Tracked</span>
               </div>
-              
+
               <button
-                onClick={() => setShowReportForm(true)}
-                className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-3 rounded-lg flex items-center space-x-2 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-1"
+                type="submit"
+                disabled={loading}
+                className={`w-full py-3 rounded-lg font-medium transition-all duration-300 shadow-lg hover:shadow-xl ${
+                  loading 
+                    ? 'bg-gray-400 text-gray-300 cursor-not-allowed' 
+                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700'
+                }`}
               >
-                <Plus className="h-5 w-5" />
-                <span className="font-medium">Report Issue</span>
+                {loading ? 'Logging in...' : 'Login'}
               </button>
+
+              <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                <h4 className="font-medium text-gray-800 mb-2">Demo Accounts:</h4>
+                <div className="text-xs text-gray-600 space-y-1">
+                  <p><strong>Super Admin:</strong> superadmin@civic.gov / admin123</p>
+                  <p><strong>PWD Admin:</strong> admin@pwd.delhi.gov / pwd123</p>
+                  <p><strong>Water Admin:</strong> admin@water.delhi.gov / water123</p>
+                </div>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleSignup} className="space-y-4">
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
+                  <input
+                    type="text"
+                    value={signupForm.name}
+                    onChange={(e) => setSignupForm(prev => ({ ...prev, name: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Enter your full name"
+                    required
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                  <input
+                    type="email"
+                    value={signupForm.email}
+                    onChange={(e) => setSignupForm(prev => ({ ...prev, email: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Enter your email"
+                    required
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
+                  <input
+                    type="tel"
+                    value={signupForm.phone}
+                    onChange={(e) => setSignupForm(prev => ({ ...prev, phone: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="+91-XXXXXXXXXX"
+                    required
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Address</label>
+                  <input
+                    type="text"
+                    value={signupForm.address}
+                    onChange={(e) => setSignupForm(prev => ({ ...prev, address: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Enter your address"
+                    required
+                    disabled={loading}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                  <div className="relative">
+                    <input
+                      type={signupForm.showPassword ? 'text' : 'password'}
+                      value={signupForm.password}
+                      onChange={(e) => setSignupForm(prev => ({ ...prev, password: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-3 pr-12 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Create a password"
+                      required
+                      minLength="6"
+                      disabled={loading}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSignupForm(prev => ({ ...prev, showPassword: !prev.showPassword }))}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      disabled={loading}
+                    >
+                      {signupForm.showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Confirm Password</label>
+                  <div className="relative">
+                    <input
+                      type={signupForm.showConfirmPassword ? 'text' : 'password'}
+                      value={signupForm.confirmPassword}
+                      onChange={(e) => setSignupForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-3 pr-12 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Confirm your password"
+                      required
+                      disabled={loading}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSignupForm(prev => ({ ...prev, showConfirmPassword: !prev.showConfirmPassword }))}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      disabled={loading}
+                    >
+                      {signupForm.showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className={`w-full py-3 rounded-lg font-medium transition-all duration-300 shadow-lg hover:shadow-xl ${
+                  loading 
+                    ? 'bg-gray-400 text-gray-300 cursor-not-allowed' 
+                    : 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-700 hover:to-emerald-700'
+                }`}
+              >
+                {loading ? 'Creating Account...' : 'Create Account'}
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  // Super Admin Dashboard
+  const SuperAdminDashboard = () => {
+    const unassignedIssues = issues.filter(i => !i.assignedAdmin && i.status === 'Open');
+    
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-6 rounded-xl text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-blue-100 text-sm">Total Issues</p>
+                <p className="text-3xl font-bold">{stats.totalIssues || 0}</p>
+              </div>
+              <FileText className="h-8 w-8 text-blue-200" />
+            </div>
+          </div>
+          
+          <div className="bg-gradient-to-r from-orange-500 to-orange-600 p-6 rounded-xl text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-orange-100 text-sm">Unassigned</p>
+                <p className="text-3xl font-bold">{unassignedIssues.length}</p>
+              </div>
+              <AlertCircle className="h-8 w-8 text-orange-200" />
+            </div>
+          </div>
+          
+          <div className="bg-gradient-to-r from-green-500 to-green-600 p-6 rounded-xl text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-green-100 text-sm">Active Admins</p>
+                <p className="text-3xl font-bold">{stats.totalAdmins || 0}</p>
+              </div>
+              <UserCheck className="h-8 w-8 text-green-200" />
+            </div>
+          </div>
+          
+          <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-6 rounded-xl text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-purple-100 text-sm">Citizens</p>
+                <p className="text-3xl font-bold">{stats.totalUsers || 0}</p>
+              </div>
+              <Users className="h-8 w-8 text-purple-200" />
             </div>
           </div>
         </div>
-      </header>
 
-      {/* Enhanced Stats Dashboard */}
-      <div className="bg-white border-b shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-            <div className="bg-gradient-to-r from-red-500 to-red-600 p-4 rounded-xl text-white">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-red-100 text-sm">Open Issues</p>
-                  <p className="text-3xl font-bold">{openStatusCount}</p>
+        <div className="bg-white rounded-2xl shadow-xl p-6">
+          <h3 className="text-xl font-bold text-gray-900 mb-4">Unassigned Issues</h3>
+          <div className="space-y-4">
+            {unassignedIssues.map(issue => (
+              <div key={issue._id} className="border border-gray-200 rounded-xl p-4 hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-gray-900">{issue.title}</h4>
+                    <p className="text-sm text-gray-600">{issue.category} • {issue.location}</p>
+                    <p className="text-xs text-gray-500 mt-1">Priority: {issue.priority}</p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <select 
+                      onChange={(e) => e.target.value && assignIssueToAdmin(issue._id, e.target.value)}
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                      defaultValue=""
+                    >
+                      <option value="">Assign to Admin</option>
+                      {admins.map(admin => (
+                        <option key={admin._id} value={admin._id}>
+                          {admin.name} ({admin.department})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <AlertCircle className="h-8 w-8 text-red-200" />
               </div>
-            </div>
-            
-            <div className="bg-gradient-to-r from-yellow-500 to-yellow-600 p-4 rounded-xl text-white">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-yellow-100 text-sm">In Progress</p>
-                  <p className="text-3xl font-bold">{inProgressCount}</p>
+            ))}
+            {unassignedIssues.length === 0 && (
+              <p className="text-gray-500 text-center py-8">All issues have been assigned!</p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Admin Dashboard
+  const AdminDashboard = () => {
+    const myIssues = issues.filter(i => 
+      i.assignedAdmin === user._id || 
+      (i.assignedAdmin === null && categories.find(c => 
+        c.id === i.category && 
+        (user.department === 'Public Works Department' && i.category === 'Roads & Transportation' ||
+         user.department === 'Water & Sanitation' && i.category === 'Water & Sanitation')
+      ))
+    );
+    
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-2xl shadow-xl p-6">
+          <h3 className="text-xl font-bold text-gray-900 mb-4">My Assigned Issues</h3>
+          <div className="space-y-4">
+            {myIssues.map(issue => (
+              <div key={issue._id} className="border border-gray-200 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-gray-900">{issue.title}</h4>
+                    <p className="text-sm text-gray-600">{issue.location}</p>
+                    <p className="text-xs text-gray-500 mt-1">{issue.description}</p>
+                    <div className="flex items-center space-x-2 mt-2">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${priorityConfig[issue.priority].color}`}>
+                        {issue.priority}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        Reported by: {issue.reportedBy?.name}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <select 
+                      value={issue.status}
+                      onChange={(e) => updateIssueStatus(issue._id, e.target.value)}
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="Open">Open</option>
+                      <option value="In Progress">In Progress</option>
+                      <option value="Resolved">Resolved</option>
+                    </select>
+                    {issue.status !== 'Resolved' && (
+                      <input
+                        type="text"
+                        placeholder="Officer name"
+                        onBlur={(e) => e.target.value && updateIssueStatus(issue._id, issue.status, e.target.value)}
+                        className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                      />
+                    )}
+                  </div>
                 </div>
-                <Clock className="h-8 w-8 text-yellow-200" />
               </div>
-            </div>
-            
-            <div className="bg-gradient-to-r from-green-500 to-green-600 p-4 rounded-xl text-white">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-green-100 text-sm">Resolved</p>
-                  <p className="text-3xl font-bold">{resolvedCount}</p>
-                </div>
-                <CheckCircle className="h-8 w-8 text-green-200" />
+            ))}
+            {myIssues.length === 0 && (
+              <p className="text-gray-500 text-center py-8">No issues assigned to your department yet.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Citizen Dashboard (Original Interface)
+  const CitizenDashboard = () => {
+    const openStatusCount = stats.openIssues || 0;
+    const inProgressCount = stats.inProgressIssues || 0;
+    const resolvedCount = stats.resolvedIssues || 0;
+
+    return (
+      <div className="space-y-6">
+        {/* Stats Dashboard */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-gradient-to-r from-red-500 to-red-600 p-4 rounded-xl text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-red-100 text-sm">Open Issues</p>
+                <p className="text-3xl font-bold">{openStatusCount}</p>
               </div>
-            </div>
-            
-            <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-4 rounded-xl text-white">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-purple-100 text-sm">Active Citizens</p>
-                  <p className="text-3xl font-bold">1,247</p>
-                </div>
-                <Users className="h-8 w-8 text-purple-200" />
-              </div>
+              <AlertCircle className="h-8 w-8 text-red-200" />
             </div>
           </div>
+          
+          <div className="bg-gradient-to-r from-yellow-500 to-yellow-600 p-4 rounded-xl text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-yellow-100 text-sm">In Progress</p>
+                <p className="text-3xl font-bold">{inProgressCount}</p>
+              </div>
+              <Clock className="h-8 w-8 text-yellow-200" />
+            </div>
+          </div>
+          
+          <div className="bg-gradient-to-r from-green-500 to-green-600 p-4 rounded-xl text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-green-100 text-sm">Resolved</p>
+                <p className="text-3xl font-bold">{resolvedCount}</p>
+              </div>
+              <CheckCircle className="h-8 w-8 text-green-200" />
+            </div>
+          </div>
+          
+          <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-4 rounded-xl text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-purple-100 text-sm">Your Points</p>
+                <p className="text-3xl font-bold">{user?.points || 0}</p>
+              </div>
+              <Star className="h-8 w-8 text-purple-200" />
+            </div>
+          </div>
+        </div>
 
+        {/* Filters */}
+        <div className="bg-white rounded-xl shadow-lg p-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            {/* Enhanced Filters */}
             <div className="flex flex-wrap items-center space-x-4">
               <Filter className="h-5 w-5 text-gray-500" />
               
@@ -513,69 +912,47 @@ const CivicReport = () => {
               </button>
             </div>
           </div>
-
-          <div className="mt-3 text-sm text-gray-600 flex items-center space-x-2">
-            <Shield className="h-4 w-4" />
-            <span>Showing {filteredIssues.length} verified issues within 1km radius</span>
-          </div>
         </div>
-      </div>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
+        {/* Main Content */}
         {view === 'map' ? (
           <div className="bg-white rounded-2xl shadow-xl border overflow-hidden">
             <div className="h-[600px] relative overflow-hidden">
-              {/* Enhanced Map with Street-like Design */}
               <div className="absolute inset-0 bg-gray-100">
                 {/* Road Network */}
                 <svg className="absolute inset-0 w-full h-full" viewBox="0 0 800 600">
-                  {/* Horizontal Roads */}
                   <rect x="0" y="150" width="800" height="8" fill="#666" />
                   <rect x="0" y="300" width="800" height="12" fill="#666" />
                   <rect x="0" y="450" width="800" height="8" fill="#666" />
-                  
-                  {/* Vertical Roads */}
                   <rect x="150" y="0" width="8" height="600" fill="#666" />
                   <rect x="300" y="0" width="12" height="600" fill="#666" />
                   <rect x="450" y="0" width="8" height="600" fill="#666" />
                   <rect x="600" y="0" width="12" height="600" fill="#666" />
                   
-                  {/* Road Markings */}
-                  <rect x="0" y="304" width="800" height="4" fill="#fff" strokeDasharray="20,10" stroke="#fff" strokeWidth="1" />
-                  <rect x="604" y="0" width="4" height="600" fill="#fff" strokeDasharray="20,10" stroke="#fff" strokeWidth="1" />
-                  
-                  {/* Buildings/Areas */}
+                  {/* Buildings */}
                   <rect x="50" y="50" width="80" height="80" fill="#e8f4f8" stroke="#b3d9e8" strokeWidth="1" rx="4" />
                   <rect x="200" y="80" width="60" height="60" fill="#f0e8f8" stroke="#d3b8e8" strokeWidth="1" rx="4" />
                   <rect x="350" y="40" width="70" height="90" fill="#e8f8e8" stroke="#b8e8b8" strokeWidth="1" rx="4" />
                   <rect x="500" y="70" width="80" height="70" fill="#f8f0e8" stroke="#e8d3b8" strokeWidth="1" rx="4" />
-                  
-                  <rect x="60" y="380" width="90" height="60" fill="#f8e8e8" stroke="#e8b8b8" strokeWidth="1" rx="4" />
-                  <rect x="320" y="360" width="80" height="80" fill="#e8f4f8" stroke="#b3d9e8" strokeWidth="1" rx="4" />
-                  <rect x="520" y="390" width="70" height="70" fill="#f0e8f8" stroke="#d3b8e8" strokeWidth="1" rx="4" />
                 </svg>
                 
-                {/* Area Labels */}
                 <div className="absolute top-4 left-4 bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-3 text-sm font-medium text-gray-800">
-                  Delhi NCR - Civic Issues Map
+                  Delhi NCR - Live Issues Map
                 </div>
                 
-                {/* Enhanced Issue Markers */}
-                {filteredIssues.slice(0, 7).map((issue, index) => {
+                {/* Issue Markers */}
+                {filteredIssues.slice(0, 10).map((issue, index) => {
                   const positions = [
-                    { left: '20%', top: '25%' },
-                    { left: '35%', top: '40%' },
-                    { left: '55%', top: '30%' },
-                    { left: '75%', top: '20%' },
-                    { left: '25%', top: '70%' },
-                    { left: '60%', top: '75%' },
-                    { left: '80%', top: '60%' }
+                    { left: '20%', top: '25%' }, { left: '35%', top: '40%' },
+                    { left: '55%', top: '30%' }, { left: '75%', top: '20%' },
+                    { left: '25%', top: '70%' }, { left: '60%', top: '75%' },
+                    { left: '80%', top: '60%' }, { left: '15%', top: '55%' },
+                    { left: '45%', top: '65%' }, { left: '70%', top: '45%' }
                   ];
                   
                   return (
                     <div
-                      key={issue.id}
+                      key={issue._id}
                       className={`absolute w-12 h-12 rounded-full border-3 border-white shadow-xl flex items-center justify-center text-white text-sm font-bold cursor-pointer hover:scale-125 transition-all duration-300 hover:shadow-2xl z-10 ${
                         issue.priority === 'Critical' ? 'bg-red-600 animate-pulse' :
                         issue.priority === 'High' ? 'bg-orange-500' :
@@ -585,12 +962,11 @@ const CivicReport = () => {
                       title={`${issue.title} - ${issue.priority} Priority`}
                       onClick={() => setSelectedIssue(issue)}
                     >
-                      {issue.id}
+                      {index + 1}
                     </div>
                   );
                 })}
                 
-                {/* Map Legend */}
                 <div className="absolute bottom-4 left-4 bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-4 text-xs">
                   <h4 className="font-bold text-gray-800 mb-2">Priority Legend</h4>
                   <div className="space-y-1">
@@ -617,7 +993,7 @@ const CivicReport = () => {
               const StatusIcon = statusConfig[issue.status].icon;
               const categoryInfo = categories.find(c => c.id === issue.category);
               return (
-                <div key={issue.id} className="bg-white rounded-2xl shadow-lg border hover:shadow-xl transition-all duration-300 overflow-hidden">
+                <div key={issue._id} className="bg-white rounded-2xl shadow-lg border hover:shadow-xl transition-all duration-300 overflow-hidden">
                   <div className="p-6">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
@@ -634,23 +1010,23 @@ const CivicReport = () => {
                             </div>
                             <p className="text-sm text-gray-600 flex items-center mb-2">
                               <MapPin className="h-4 w-4 mr-2 text-blue-500" />
-                              {issue.location} • {issue.distance} away
+                              {issue.location}
                             </p>
                             <div className="flex items-center space-x-4 text-sm text-gray-500">
-                              <span>📅 {issue.date}</span>
-                              <span>👤 {issue.reportedBy}</span>
-                              <span>📞 {issue.reporterContact}</span>
+                              <span>📅 {new Date(issue.createdAt).toLocaleDateString()}</span>
+                              <span>👤 {issue.reportedBy?.name}</span>
                             </div>
                           </div>
                         </div>
                         
                         <p className="text-gray-700 mb-4 leading-relaxed">{issue.description}</p>
                         
-                        {/* Enhanced Issue Details */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 p-4 bg-gray-50 rounded-xl">
                           <div>
                             <p className="text-xs text-gray-500 mb-1">Assigned Officer</p>
-                            <p className="text-sm font-medium text-gray-800">{issue.assignedOfficer}</p>
+                            <p className="text-sm font-medium text-gray-800">
+                              {issue.assignedOfficer || 'Not assigned'}
+                            </p>
                           </div>
                           <div>
                             <p className="text-xs text-gray-500 mb-1">Timeline</p>
@@ -658,36 +1034,32 @@ const CivicReport = () => {
                           </div>
                         </div>
 
-                        {/* Engagement Actions */}
                         <div className="flex items-center space-x-6">
                           <button 
-                            onClick={() => handleUpvote(issue.id)}
+                            onClick={() => handleUpvote(issue._id)}
                             className={`flex items-center space-x-2 transition-colors ${
-                              userVotes.has(issue.id) 
+                              userVotes.has(issue._id) 
                                 ? 'text-blue-800 bg-blue-100 px-3 py-1 rounded-full' 
                                 : 'text-blue-600 hover:text-blue-700'
                             }`}
-                            disabled={userVotes.has(issue.id)}
+                            disabled={userVotes.has(issue._id)}
                           >
                             <ThumbsUp className="h-4 w-4" />
                             <span className="text-sm font-medium">
-                              {issue.upvotes} {userVotes.has(issue.id) ? 'Voted' : 'Upvotes'}
+                              {issue.upvotes} {userVotes.has(issue._id) ? 'Voted' : 'Upvotes'}
                             </span>
                           </button>
                           <div className="flex items-center space-x-2 text-gray-600">
                             <MessageCircle className="h-4 w-4" />
-                            <span className="text-sm">{issue.comments} Comments</span>
+                            <span className="text-sm">{issue.comments?.length || 0} Comments</span>
                           </div>
-                          <button className="text-green-600 hover:text-green-700 text-sm font-medium transition-colors">
-                            Follow Updates
-                          </button>
                         </div>
                       </div>
                       
                       <div className="ml-6 flex flex-col items-end space-y-4">
-                        {issue.image && (
+                        {issue.images && issue.images.length > 0 && (
                           <img 
-                            src={issue.image} 
+                            src={`${API_BASE_URL.replace('/api', '')}/uploads/${issue.images[0]}`} 
                             alt="Issue Evidence" 
                             className="w-32 h-32 rounded-xl object-cover border-2 border-gray-200 shadow-md hover:shadow-lg transition-shadow cursor-pointer"
                             onClick={() => setSelectedIssue(issue)}
@@ -698,21 +1070,119 @@ const CivicReport = () => {
                           <StatusIcon className="h-4 w-4" />
                           <span className="text-sm font-bold">{statusConfig[issue.status].label}</span>
                         </div>
-                        
-                        <div className={`px-3 py-1 rounded-lg text-xs font-medium text-white ${categoryInfo?.color} shadow-sm`}>
-                          {issue.category}
-                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               );
             })}
+            {filteredIssues.length === 0 && (
+              <div className="text-center py-12">
+                <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-500 text-lg">No issues found matching your filters</p>
+              </div>
+            )}
           </div>
         )}
+      </div>
+    );
+  };
+
+  // Main App Component
+  const MainApp = () => (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      {/* Header */}
+      <header className="bg-white shadow-lg border-b border-blue-200">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-3 rounded-xl shadow-lg">
+                <MapPin className="h-8 w-8 text-white" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                  Civic Report System
+                </h1>
+                <p className="text-sm text-gray-600">
+                  {user?.role === 'superadmin' ? 'Super Admin Dashboard' :
+                   user?.role === 'admin' ? `${user.department} Admin` :
+                   'Smart India Hackathon 2025 | Team Tech Titans'}
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-3">
+                <div className="bg-gradient-to-r from-blue-500 to-indigo-500 p-2 rounded-full text-white">
+                  <User className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-800">{user?.name}</p>
+                  <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+                </div>
+              </div>
+              
+              {user?.role === 'citizen' && (
+                <div className="bg-gradient-to-r from-yellow-400 to-orange-500 px-4 py-2 rounded-full flex items-center space-x-2">
+                  <Star className="h-4 w-4 text-white" />
+                  <span className="text-sm font-bold text-white">{user.points} Points</span>
+                </div>
+              )}
+              
+              {user?.role === 'citizen' && (
+                <button
+                  onClick={() => setShowReportForm(true)}
+                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-3 rounded-lg flex items-center space-x-2 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-1"
+                >
+                  <Plus className="h-5 w-5" />
+                  <span className="font-medium">Report Issue</span>
+                </button>
+              )}
+              
+              <button
+                onClick={handleLogout}
+                className="text-gray-600 hover:text-gray-800 p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <LogOut className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Loading Overlay */}
+      {loading && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 flex items-center space-x-3">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+            <span className="text-gray-700">Loading...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Error Display */}
+      {error && (
+        <div className="max-w-7xl mx-auto px-4 py-2">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <AlertCircle className="h-5 w-5" />
+              <span>{error}</span>
+            </div>
+            <button onClick={() => setError('')} className="text-red-600 hover:text-red-800">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 py-6">
+        {currentPage === 'superadmin' && <SuperAdminDashboard />}
+        {currentPage === 'admin' && <AdminDashboard />}
+        {currentPage === 'citizen' && <CitizenDashboard />}
       </main>
 
-      {/* Enhanced Report Issue Modal */}
+      {/* Report Issue Modal */}
       {showReportForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -735,12 +1205,6 @@ const CivicReport = () => {
                 </button>
               </div>
 
-              {!isLoggedIn && (
-                <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
-                  <p className="text-yellow-800 text-sm">Please login with Google to report an issue.</p>
-                </div>
-              )}
-
               <form onSubmit={handleSubmitIssue} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="md:col-span-2">
@@ -752,7 +1216,7 @@ const CivicReport = () => {
                       className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                       placeholder="Brief, descriptive title of the issue"
                       required
-                      disabled={!isLoggedIn}
+                      disabled={loading}
                     />
                   </div>
 
@@ -762,7 +1226,7 @@ const CivicReport = () => {
                       value={newIssue.category}
                       onChange={(e) => setNewIssue(prev => ({ ...prev, category: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      disabled={!isLoggedIn}
+                      disabled={loading}
                     >
                       {categories.map(cat => (
                         <option key={cat.id} value={cat.id}>{cat.icon} {cat.label}</option>
@@ -776,7 +1240,7 @@ const CivicReport = () => {
                       value={newIssue.priority}
                       onChange={(e) => setNewIssue(prev => ({ ...prev, priority: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      disabled={!isLoggedIn}
+                      disabled={loading}
                     >
                       <option value="Low">🔵 Low Priority</option>
                       <option value="Medium">🟡 Medium Priority</option>
@@ -794,7 +1258,7 @@ const CivicReport = () => {
                     className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 h-24 transition-colors"
                     placeholder="Provide detailed information about the issue, its impact, and any relevant context"
                     required
-                    disabled={!isLoggedIn}
+                    disabled={loading}
                   />
                 </div>
 
@@ -807,90 +1271,70 @@ const CivicReport = () => {
                     className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                     placeholder="Specific address, landmark, or area description"
                     required
-                    disabled={!isLoggedIn}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">📍 GPS coordinates will be automatically captured</p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Your Name *</label>
-                    <input
-                      type="text"
-                      value={newIssue.reporterName}
-                      onChange={(e) => setNewIssue(prev => ({ ...prev, reporterName: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      placeholder="Full name"
-                      required
-                      disabled={!isLoggedIn}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Number *</label>
-                    <input
-                      type="tel"
-                      value={newIssue.reporterContact}
-                      onChange={(e) => setNewIssue(prev => ({ ...prev, reporterContact: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                      placeholder="+91-XXXXXXXXXX"
-                      required
-                      disabled={!isLoggedIn}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Your Address</label>
-                  <input
-                    type="text"
-                    value={newIssue.reporterAddress}
-                    onChange={(e) => setNewIssue(prev => ({ ...prev, reporterAddress: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                    placeholder="Your residential address (optional)"
-                    disabled={!isLoggedIn}
+                    disabled={loading}
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Upload Evidence</label>
                   <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-blue-500 transition-colors bg-gray-50 hover:bg-blue-50">
-                    {newIssue.image ? (
+                    {newIssue.images.length > 0 ? (
                       <div className="space-y-4">
-                        <img src={newIssue.image} alt="Preview" className="w-full h-48 object-cover rounded-lg shadow-sm" />
-                        <div className="flex space-x-3 justify-center">
-                          <button
-                            type="button"
-                            onClick={() => setNewIssue(prev => ({ ...prev, image: null }))}
-                            className="text-sm text-red-600 hover:text-red-700 font-medium"
-                          >
-                            Remove Image
-                          </button>
+                        <div className="grid grid-cols-2 gap-4">
+                          {newIssue.images.map((image, index) => (
+                            <div key={index} className="relative">
+                              <img 
+                                src={URL.createObjectURL(image)} 
+                                alt="Preview" 
+                                className="w-full h-24 object-cover rounded-lg" 
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeImage(index)}
+                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
                         </div>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={handleImageUpload}
+                          className="hidden"
+                          id="additional-upload"
+                          disabled={loading}
+                        />
+                        <label
+                          htmlFor="additional-upload"
+                          className="inline-flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-700 transition-colors"
+                        >
+                          <Plus className="h-4 w-4" />
+                          <span>Add More</span>
+                        </label>
                       </div>
                     ) : (
                       <div>
                         <Camera className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                        <p className="text-sm text-gray-600 mb-2">Upload photo/video evidence</p>
-                        <p className="text-xs text-gray-500 mb-4">Supports JPG, PNG, MP4 (Max 10MB)</p>
+                        <p className="text-sm text-gray-600 mb-2">Upload photo evidence</p>
+                        <p className="text-xs text-gray-500 mb-4">Supports JPG, PNG (Max 5MB each)</p>
                         <input
                           type="file"
-                          accept="image/*,video/*"
+                          accept="image/*"
+                          multiple
                           onChange={handleImageUpload}
                           className="hidden"
                           id="media-upload"
-                          disabled={!isLoggedIn}
+                          disabled={loading}
                         />
                         <label
                           htmlFor="media-upload"
-                          className={`${
-                            isLoggedIn 
-                              ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white cursor-pointer hover:from-blue-700 hover:to-indigo-700' 
-                              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          } px-6 py-3 rounded-lg transition-all duration-300 inline-flex items-center space-x-2 shadow-lg hover:shadow-xl`}
+                          className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white cursor-pointer hover:from-blue-700 hover:to-indigo-700 px-6 py-3 rounded-lg transition-all duration-300 inline-flex items-center space-x-2 shadow-lg hover:shadow-xl"
                         >
                           <Upload className="h-4 w-4" />
-                          <span>Choose File</span>
+                          <span>Choose Files</span>
                         </label>
                       </div>
                     )}
@@ -902,20 +1346,17 @@ const CivicReport = () => {
                     type="button"
                     onClick={() => setShowReportForm(false)}
                     className="flex-1 border border-gray-300 text-gray-700 py-3 px-6 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                    disabled={loading}
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    disabled={!isLoggedIn}
-                    className={`flex-2 py-3 px-8 rounded-lg transition-all duration-300 flex items-center justify-center space-x-2 font-medium shadow-lg hover:shadow-xl ${
-                      isLoggedIn
-                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    }`}
+                    disabled={loading}
+                    className="flex-2 py-3 px-8 rounded-lg transition-all duration-300 flex items-center justify-center space-x-2 font-medium shadow-lg hover:shadow-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Send className="h-5 w-5" />
-                    <span>Submit Issue Report</span>
+                    <span>{loading ? 'Submitting...' : 'Submit Issue Report'}</span>
                   </button>
                 </div>
               </form>
@@ -929,8 +1370,12 @@ const CivicReport = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="relative">
-              {selectedIssue.image && (
-                <img src={selectedIssue.image} alt="Issue" className="w-full h-64 object-cover" />
+              {selectedIssue.images && selectedIssue.images.length > 0 && (
+                <img 
+                  src={`${API_BASE_URL.replace('/api', '')}/uploads/${selectedIssue.images[0]}`} 
+                  alt="Issue" 
+                  className="w-full h-64 object-cover" 
+                />
               )}
               <button
                 onClick={() => setSelectedIssue(null)}
@@ -957,45 +1402,43 @@ const CivicReport = () => {
                       <div className="space-y-2 text-sm">
                         <p><strong>Location:</strong> {selectedIssue.location}</p>
                         <p><strong>Category:</strong> {selectedIssue.category}</p>
-                        <p><strong>Reported:</strong> {selectedIssue.date}</p>
-                        <p><strong>Distance:</strong> {selectedIssue.distance}</p>
+                        <p><strong>Reported:</strong> {new Date(selectedIssue.createdAt).toLocaleDateString()}</p>
                       </div>
                     </div>
                     
                     <div>
                       <h4 className="font-semibold text-gray-900 mb-2">Contact Info</h4>
                       <div className="space-y-2 text-sm">
-                        <p><strong>Reporter:</strong> {selectedIssue.reportedBy}</p>
-                        <p><strong>Phone:</strong> {selectedIssue.reporterContact}</p>
-                        <p><strong>Officer:</strong> {selectedIssue.assignedOfficer}</p>
+                        <p><strong>Reporter:</strong> {selectedIssue.reportedBy?.name}</p>
+                        <p><strong>Phone:</strong> {selectedIssue.reportedBy?.phone}</p>
+                        <p><strong>Officer:</strong> {selectedIssue.assignedOfficer || 'Not assigned'}</p>
                         <p><strong>Timeline:</strong> {selectedIssue.timeline}</p>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-6 pt-4 border-t">
-                    <button 
-                      onClick={() => handleUpvote(selectedIssue.id)}
-                      className={`flex items-center space-x-2 font-medium transition-colors ${
-                        userVotes.has(selectedIssue.id) 
-                          ? 'text-blue-800 bg-blue-100 px-3 py-1 rounded-full' 
-                          : 'text-blue-600 hover:text-blue-700'
-                      }`}
-                      disabled={userVotes.has(selectedIssue.id)}
-                    >
-                      <ThumbsUp className="h-5 w-5" />
-                      <span>
-                        {selectedIssue.upvotes} {userVotes.has(selectedIssue.id) ? 'Voted' : 'Support This'}
-                      </span>
-                    </button>
-                    <div className="flex items-center space-x-2 text-gray-600">
-                      <MessageCircle className="h-5 w-5" />
-                      <span>{selectedIssue.comments} Comments</span>
+                  {user?.role === 'citizen' && (
+                    <div className="flex items-center space-x-6 pt-4 border-t">
+                      <button 
+                        onClick={() => handleUpvote(selectedIssue._id)}
+                        className={`flex items-center space-x-2 font-medium transition-colors ${
+                          userVotes.has(selectedIssue._id) 
+                            ? 'text-blue-800 bg-blue-100 px-3 py-1 rounded-full' 
+                            : 'text-blue-600 hover:text-blue-700'
+                        }`}
+                        disabled={userVotes.has(selectedIssue._id)}
+                      >
+                        <ThumbsUp className="h-5 w-5" />
+                        <span>
+                          {selectedIssue.upvotes} {userVotes.has(selectedIssue._id) ? 'Voted' : 'Support This'}
+                        </span>
+                      </button>
+                      <div className="flex items-center space-x-2 text-gray-600">
+                        <MessageCircle className="h-5 w-5" />
+                        <span>{selectedIssue.comments?.length || 0} Comments</span>
+                      </div>
                     </div>
-                    <button className="text-green-600 hover:text-green-700 font-medium">
-                      Follow Updates
-                    </button>
-                  </div>
+                  )}
                 </div>
                 
                 <div className={`px-4 py-2 rounded-full flex items-center space-x-2 ${statusConfig[selectedIssue.status].color}`}>
@@ -1024,6 +1467,13 @@ const CivicReport = () => {
       </footer>
     </div>
   );
+
+  // Main render logic
+  if (!isLoggedIn) {
+    return <AuthPage />;
+  }
+
+  return <MainApp />;
 };
 
-export default CivicReport;
+export default CivicReportApp;
